@@ -4,10 +4,8 @@ export default async function handler(req, res) {
   const { message, history } = req.body;
 
   const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-
   if (!OPENROUTER_API_KEY) {
-    console.error("OPENROUTER_API_KEY is missing!");
-    return res.status(500).json({ reply: "Server misconfiguration: API key missing" });
+    return res.status(500).json({ reply: "OpenRouter API key not set" });
   }
 
   try {
@@ -29,15 +27,9 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
-
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-      console.error("OpenRouter response invalid:", data);
-      return res.status(500).json({ reply: "OpenRouter returned invalid response" });
-    }
-
     res.json({ reply: data.choices[0].message.content });
   } catch (e) {
-    console.error("Error contacting OpenRouter API:", e);
+    console.error(e);
     res.status(500).json({ reply: "Error contacting OpenRouter API" });
   }
 }
