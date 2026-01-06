@@ -74,25 +74,52 @@
     let active = false;
     let hasSpoken = false;
     let wakeLock = null;
+    let conversation = [];
 
-    const greetings = [
-      "Hey.",
-      "Oh, hi.",
-      "I see you.",
-      "You're back.",
-      "Hey there."
-    ];
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-    function randomGreeting() {
-      return greetings[Math.floor(Math.random() * greetings.length)];
-    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onresult = event => {
+      const userText = event.results[0][0].transcript;
+      spokenEl.textContent = "You: " + userText;
+      sendToAI(userText);
+    };
 
     function speak(text) {
       spokenEl.textContent = text;
       const utter = new SpeechSynthesisUtterance(text);
       utter.volume = 1;
       utter.rate = 1;
+
+      utter.onend = () => {
+        recognition.start();
+      };
+
       speechSynthesis.speak(utter);
+    }
+
+    async function sendToAI(text) {
+      conversation.push({ role: "user", content: text });
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, history: conversation })
+        });
+
+        const data = await res.json();
+        conversation.push({ role: "assistant", content: data.reply });
+        speak(data.reply);
+      } catch (e) {
+        console.error(e);
+        speak("I had trouble thinking just now.");
+      }
     }
 
     function beep() {
@@ -102,10 +129,7 @@
       osc.frequency.value = 1000;
       osc.connect(ctx.destination);
       osc.start();
-      setTimeout(() => {
-        osc.stop();
-        ctx.close();
-      }, 400);
+      setTimeout(() => { osc.stop(); ctx.close(); }, 400);
     }
 
     async function requestWakeLock() {
@@ -144,14 +168,10 @@
     }
 
     const faceDetection = new FaceDetection({
-      locateFile: file =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
     });
 
-    faceDetection.setOptions({
-      model: "short",
-      minDetectionConfidence: 0.6
-    });
+    faceDetection.setOptions({ model: "short", minDetectionConfidence: 0.6 });
 
     faceDetection.onResults(results => {
       if (!active) return;
@@ -160,9 +180,9 @@
 
       if (detected && !hasSpoken) {
         hasSpoken = true;
-        const msg = randomGreeting();
+        conversation = []; // reset previous conversation
         status.textContent = "👀 Human detected";
-        speak(msg);
+        sendToAI("Someone walks into the room.");
       }
 
       if (!detected) {
