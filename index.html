@@ -4,148 +4,201 @@
   <meta charset="UTF-8" />
   <title>Human Detection AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <style>
-    body { margin:0; background:black; color:white; font-family:system-ui; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; text-align:center; }
-    video { width:100%; max-width:480px; transform:scaleX(-1); display:block; }
-    button { font-size:1.5rem; padding:15px 30px; background:#111; color:white; border:2px solid white; cursor:pointer; }
-    #status{margin-top:15px;opacity:0.85;}
-    #spoken{margin-top:10px;font-size:1.2rem;opacity:0.9;}
-    #countdown{font-size:3rem;margin-top:20px;}
+    body {
+      margin: 0;
+      background: black;
+      color: white;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      text-align: center;
+    }
+
+    video {
+      width: 100%;
+      max-width: 480px;
+      transform: scaleX(-1);
+      display: none;
+    }
+
+    button {
+      font-size: 1.5rem;
+      padding: 15px 30px;
+      background: #111;
+      color: white;
+      border: 2px solid white;
+      cursor: pointer;
+    }
+
+    #status {
+      margin-top: 15px;
+      opacity: 0.85;
+    }
+
+    #spoken {
+      margin-top: 10px;
+      font-size: 1.2rem;
+      opacity: 0.9;
+    }
+
+    #countdown {
+      font-size: 3rem;
+      margin-top: 20px;
+    }
   </style>
+
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
+
 <body>
   <button id="activateBtn">Activate</button>
   <div id="countdown"></div>
+
   <video id="video" autoplay playsinline muted></video>
   <div id="spoken"></div>
   <div id="status"></div>
 
-<script>
-const video = document.getElementById("video");
-const activateBtn = document.getElementById("activateBtn");
-const countdownEl = document.getElementById("countdown");
-const status = document.getElementById("status");
-const spokenEl = document.getElementById("spoken");
+  <script>
+    const video = document.getElementById("video");
+    const activateBtn = document.getElementById("activateBtn");
+    const countdownEl = document.getElementById("countdown");
+    const status = document.getElementById("status");
+    const spokenEl = document.getElementById("spoken");
 
-let active = false;
-let hasSpoken = false;
-let wakeLock = null;
-let conversation = [];
-let camera = null;
+    let active = false;
+    let hasSpoken = false;
+    let wakeLock = null;
+    let conversation = [];
 
-// Speech recognition setup
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const recognition = new SpeechRecognition();
-recognition.lang = "en-US";
-recognition.continuous = false;
-recognition.interimResults = false;
+    // --- Speech Recognition ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = false;
 
-recognition.onresult = e => {
-  const userText = e.results[0][0].transcript;
-  spokenEl.textContent = "You: " + userText;
-  sendToAI(userText);
-};
+    recognition.onresult = event => {
+      const userText = event.results[0][0].transcript;
+      spokenEl.textContent = "You: " + userText;
+      sendToAI(userText);
+    };
 
-function speak(text){
-  spokenEl.textContent = text;
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.volume = 1; utter.rate = 1;
-  utter.onend = ()=>{ recognition.start(); };
-  speechSynthesis.speak(utter);
-}
-
-async function sendToAI(text){
-  conversation.push({role:"user", content:text});
-  try{
-    const res = await fetch("/api/chat", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({message:text, history:conversation})
-    });
-    const data = await res.json();
-    conversation.push({role:"assistant", content:data.reply});
-    speak(data.reply);
-  }catch(e){
-    console.error(e);
-    speak("I had trouble thinking just now.");
-  }
-}
-
-function beep(){
-  const ctx = new AudioContext();
-  const osc = ctx.createOscillator();
-  osc.type="sine"; osc.frequency.value=1000;
-  osc.connect(ctx.destination);
-  osc.start();
-  setTimeout(()=>{osc.stop(); ctx.close();}, 400);
-}
-
-async function requestWakeLock(){
-  try{ if("wakeLock" in navigator) wakeLock=await navigator.wakeLock.request("screen"); }
-  catch(e){}
-}
-
-// MediaPipe setup
-const faceDetection = new FaceDetection({locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${f}`});
-faceDetection.setOptions({model:"short", minDetectionConfidence:0.6});
-faceDetection.onResults(results=>{
-  if(!active) return;
-  const detected = results.detections.length>0;
-  if(detected && !hasSpoken){
-    hasSpoken = true;
-    conversation = [];
-    status.textContent="👀 Human detected";
-    sendToAI("Someone walks into the room.");
-  }
-  if(!detected){
-    hasSpoken = false;
-    status.textContent="No human detected";
-  }
-});
-
-async function startCamera(){
-  camera = new Camera(video,{
-    onFrame: async()=>{ await faceDetection.send({image:video}); },
-    width:480,
-    height:360
-  });
-  camera.start();
-}
-
-// Activate button logic
-activateBtn.onclick = async()=>{
-  activateBtn.style.display="none";
-  await requestWakeLock();
-
-  // Request permissions immediately
-  try{
-    await navigator.mediaDevices.getUserMedia({video:true, audio:true});
-  }catch(e){
-    alert("Camera and microphone access is required!");
-    return;
-  }
-
-  // Start recognition immediately to trigger mic prompt
-  recognition.start();
-
-  // Countdown visual only, AI logic starts after
-  let count = 10;
-  countdownEl.textContent = count;
-  const timer = setInterval(async()=>{
-    count--;
-    countdownEl.textContent = count;
-    if(count<=0){
-      clearInterval(timer);
-      countdownEl.textContent="";
-      beep();
-      active=true;
-      status.textContent="Active — waiting for human";
-      await startCamera(); // start MediaPipe camera
+    // --- Text-to-speech ---
+    function speak(text) {
+      spokenEl.textContent = text;
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.volume = 1;
+      utter.rate = 1;
+      utter.onend = () => { recognition.start(); };
+      speechSynthesis.speak(utter);
     }
-  },1000);
-};
-</script>
+
+    async function sendToAI(text) {
+      conversation.push({ role: "user", content: text });
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, history: conversation })
+        });
+        const data = await res.json();
+        conversation.push({ role: "assistant", content: data.reply });
+        speak(data.reply);
+      } catch (e) {
+        console.error(e);
+        speak("I had trouble thinking just now.");
+      }
+    }
+
+    function beep() {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = 1000;
+      osc.connect(ctx.destination);
+      osc.start();
+      setTimeout(() => {
+        osc.stop();
+        ctx.close();
+      }, 400);
+    }
+
+    async function requestWakeLock() {
+      try {
+        if ("wakeLock" in navigator) {
+          wakeLock = await navigator.wakeLock.request("screen");
+        }
+      } catch (e) {}
+    }
+
+    activateBtn.onclick = async () => {
+      activateBtn.style.display = "none";
+      await requestWakeLock();
+
+      let count = 10;
+      countdownEl.textContent = count;
+
+      const timer = setInterval(() => {
+        count--;
+        countdownEl.textContent = count;
+
+        if (count <= 0) {
+          clearInterval(timer);
+          countdownEl.textContent = "";
+          beep();
+          startDetection();
+        }
+      }, 1000);
+    };
+
+    function startDetection() {
+      active = true;
+      video.style.display = "block";
+      status.textContent = "Active — waiting for human";
+      camera.start();
+    }
+
+    const faceDetection = new FaceDetection({
+      locateFile: file =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
+    });
+
+    faceDetection.setOptions({
+      model: "short",
+      minDetectionConfidence: 0.6
+    });
+
+    faceDetection.onResults(results => {
+      if (!active) return;
+
+      const detected = results.detections.length > 0;
+
+      if (detected && !hasSpoken) {
+        hasSpoken = true;
+        conversation = []; // reset conversation for new person
+        status.textContent = "👀 Human detected";
+        sendToAI("Someone walks into the room.");
+      }
+
+      if (!detected) {
+        hasSpoken = false;
+        status.textContent = "No human detected";
+      }
+    });
+
+    const camera = new Camera(video, {
+      onFrame: async () => {
+        await faceDetection.send({ image: video });
+      },
+      width: 480,
+      height: 360
+    });
+  </script>
 </body>
 </html>
